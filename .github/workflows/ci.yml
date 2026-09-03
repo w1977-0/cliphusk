@@ -31,6 +31,7 @@ jobs:
         shell: bash
         run: |
           # portable layout: rename the dist bundle, put app sources in Resources/app
+          mkdir -p out
           cp -R node_modules/electron/dist/Electron.app out/cliphusk.app
           rm -rf out/cliphusk.app/Contents/Resources/default_app.asar
           mkdir -p out/cliphusk.app/Contents/Resources/app
