@@ -1,0 +1,14 @@
+{
+  "name": "cliphusk",
+  "version": "0.1.0",
+  "description": "Windows & Mac offline clipboard history — keyboard-first, search, pin, images. Zero network.",
+  "main": "main.js",
+  "scripts": {
+    "test": "node --test test/cliplib.test.js",
+    "build": "node build.js",
+    "start": "electron .",
+    "selftest": "electron . --selftest"
+  },
+  "devDependencies": { "electron": "^44.1.1" },
+  "license": "MIT"
+}

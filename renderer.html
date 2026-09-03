@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'unsafe-inline'">
+<title>cliphusk</title>
+<style>
+  :root {
+    --ink: #141311; --paper: #fdfcf8; --fg: #141311; --bg: #f4f2ec;
+    --faint: rgba(20,19,17,.55); --hair: rgba(20,19,17,.18);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --ink: #f2efe8; --paper: #1b1b1f; --fg: #ece9e2; --bg: #17171a; --faint: rgba(242,239,232,.55); --hair: rgba(242,239,232,.16); }
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    font: 13px/1.45 ui-sans-serif, system-ui, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--fg);
+    -webkit-font-smoothing: antialiased; user-select: none;
+  }
+  .search {
+    display: flex; align-items: center; gap: .55rem;
+    padding: .7rem .9rem; border-bottom: 2px solid var(--fg);
+  }
+  .search .glyph { font-weight: 800; letter-spacing: .04em; font-size: .78rem; color: var(--faint); }
+  .search input {
+    flex: 1; border: 0; outline: 0; background: transparent; color: var(--fg);
+    font: inherit; -webkit-user-select: text; user-select: text;
+  }
+  .search input::placeholder { color: var(--faint); }
+  .count { font: 650 .72rem/1 ui-monospace, Menlo, Consolas, monospace; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .list { overflow-y: auto; height: calc(100% - 3.1rem); }
+  .sect { font-size: .64rem; font-weight: 700; letter-spacing: .22em; color: var(--faint);
+          padding: .55rem .9rem .3rem; text-transform: uppercase; }
+  .item {
+    display: flex; align-items: center; gap: .7rem;
+    padding: .55rem .9rem; cursor: pointer;
+    border-bottom: 1px solid var(--hair);
+  }
+  .item.sel { background: var(--fg); color: var(--bg); }
+  .item.sel .meta { color: inherit; opacity: .65; }
+  .item .thumb {
+    width: 2.1rem; height: 2.1rem; object-fit: cover; border: 1px solid var(--hair);
+    flex: none; background: var(--paper);
+  }
+  .item .txt { flex: 1; min-width: 0; }
+  .item .txt .t {
+    font: 500 .82rem/1.35 ui-monospace, Menlo, Consolas, monospace;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .item .meta {
+    font: 400 .64rem/1 ui-monospace, Menlo, monospace; color: var(--faint);
+    margin-top: .22rem; font-variant-numeric: tabular-nums; display: flex; gap: .6rem;
+  }
+  .item .meta .mark { font-weight: 700; }
+  .item .act { display: none; gap: .25rem; }
+  .item.sel .act { display: flex; }
+  .item .act button {
+    font: 700 .68rem/1 inherit; border: 1px solid currentColor; background: transparent;
+    color: inherit; padding: .28rem .42rem; cursor: pointer; border-radius: 0;
+  }
+  .empty { padding: 2.2rem 1rem; text-align: center; color: var(--faint); font-size: .82rem; }
+  .empty .big { font-size: 1.5rem; margin-bottom: .5rem; letter-spacing: .3em; font-weight: 200; }
+  .keys {
+    display: flex; gap: 1rem; padding: .5rem .9rem; font-size: .66rem; color: var(--faint);
+    border-top: 1px solid var(--hair); justify-content: space-between;
+  }
+  .keys kbd { font: 650 .64rem/1 ui-monospace, monospace; border: 1px solid var(--hair); padding: .12rem .3rem; margin-right: .2rem; }
+</style>
+</head>
+<body>
+  <div class="search">
+    <span class="glyph">⌕</span>
+    <input id="q" placeholder="搜索历史 / search history" autocomplete="off" spellcheck="false">
+    <span class="count" id="count">0</span>
+  </div>
+  <div class="list" id="list"></div>
+  <div class="keys">
+    <span><kbd>↑↓</kbd>选择 <kbd>⏎</kbd>粘贴 <kbd>Esc</kbd>收起</span>
+    <span><kbd>P</kbd>置顶 <kbd>⌫</kbd>删除 <kbd>⇧C</kbd>清空未置顶</span>
+  </div>
+<script>
+// cliplib.js — cliphusk pure logic core. Zero dependencies, browser + Node.
+//
+// Everything that can be tested without a live clipboard lives here:
+// history ring, dedup-to-top, cap eviction, pinning, search, preview text.
+
+(function (root, factory) {
+  if (typeof module === "object" && module.exports) module.exports = factory();
+  else root.cliplib = factory();
+})(typeof self !== "undefined" ? self : this, function () {
+  "use strict";
+
+  var DEFAULT_CAP = 500;      // history entries kept (Maccy-ish)
+  var TEXT_PREVIEW_LEN = 120; // what shows in the list row
+
+  // ---- history ------------------------------------------------------------
+  // entry: { id, kind: "text"|"image", text?, image?, ts, pinned? }
+  // Invariants enforced by push():
+  //   - newest first
+  //   - duplicate content moves to top (Maccy semantics), keeping its pin
+  //   - pinned entries are exempt from cap eviction
+  //   - ids are monotonically increasing strings
+
+  var idCounter = 0;
+  function newId() {
+    idCounter += 1;
+    return "c" + idCounter + "-" + Date.now().toString(36);
+  }
+
+  function sameContent(a, b) {
+    if (a.kind !== b.kind) return false;
+    if (a.kind === "image") return a.image === b.image;
+    return a.text === b.text;
+  }
+
+  function push(history, item, opts) {
+    opts = opts || {};
+    var cap = opts.cap || DEFAULT_CAP;
+    var entry = {
+      id: item.id || newId(),
+      kind: item.kind,
+      text: item.text || null,
+      image: item.image || null,   // dataURL for images
+      ts: item.ts || Date.now(),
+      pinned: !!item.pinned
+    };
+    // dedup-to-top: remove an equal existing entry first
+    for (var i = 0; i < history.length; i++) {
+      if (sameContent(history[i], entry)) {
+        entry.pinned = entry.pinned || history[i].pinned; // keep the pin
+        history.splice(i, 1);
+        break;
+      }
+    }
+    history.unshift(entry);
+    // cap eviction: keep the newest `cap` unpinned entries, drop the excess
+    // (oldest) ones; pinned entries never count against the cap.
+    // Walking tail-first and counting "seen" (the original version) drops
+    // the NEWEST overflow entry instead — the excess walk below deletes
+    // exactly the oldest `excess` unpinned items.
+    var unpinned = 0;
+    for (var k = 0; k < history.length; k++) if (!history[k].pinned) unpinned += 1;
+    var excess = unpinned - cap;
+    var removed = 0;
+    for (var j = history.length - 1; j >= 0 && removed < excess; j--) {
+      if (!history[j].pinned) { history.splice(j, 1); removed += 1; }
+    }
+    return entry;
+  }
+
+  function togglePin(history, id) {
+    for (var i = 0; i < history.length; i++) {
+      if (history[i].id === id) {
+        history[i].pinned = !history[i].pinned;
+        return history[i].pinned;
+      }
+    }
+    return null;
+  }
+
+  function remove(history, id) {
+    for (var i = 0; i < history.length; i++) {
+      if (history[i].id === id) { history.splice(i, 1); return true; }
+    }
+    return false;
+  }
+
+  function getById(history, id) {
+    for (var i = 0; i < history.length; i++) if (history[i].id === id) return history[i];
+    return null;
+  }
+
+  // ---- search ---------------------------------------------------------------
+  // Case-insensitive substring match over visible text (title+content).
+  // Image entries match on "(图片)" marker only when the query is empty.
+  function search(history, query) {
+    query = (query || "").trim().toLowerCase();
+    if (!query) return history.slice();
+    return history.filter(function (e) {
+      var hay = (e.kind === "image" ? "图片 image " : e.text) || "";
+      return hay.toLowerCase().indexOf(query) !== -1;
+    });
+  }
+
+  // ---- preview row text -----------------------------------------------------
+  // First line, whitespace-collapsed, truncated; images get a size descriptor.
+  function previewOf(entry) {
+    if (entry.kind === "image") return "图片 image";
+    var t = (entry.text || "").replace(/\s+/g, " ").trim();
+    if (t.length > TEXT_PREVIEW_LEN) return t.slice(0, TEXT_PREVIEW_LEN - 1) + "…";
+    return t;
+  }
+
+  // relative time for the row's right edge
+  function timeAgo(ts, now) {
+    now = now || Date.now();
+    var s = Math.max(0, Math.floor((now - ts) / 1000));
+    if (s < 10) return "刚刚 now";
+    if (s < 60) return s + "s";
+    var m = Math.floor(s / 60);
+    if (m < 60) return m + "m";
+    var h = Math.floor(m / 60);
+    if (h < 24) return h + "h";
+    return Math.floor(h / 24) + "d";
+  }
+
+  return {
+    DEFAULT_CAP: DEFAULT_CAP,
+    newId: newId,
+    sameContent: sameContent,
+    push: push,
+    togglePin: togglePin,
+    remove: remove,
+    getById: getById,
+    search: search,
+    previewOf: previewOf,
+    timeAgo: timeAgo
+  };
+});
+
+
+(function () {
+  "use strict";
+  // cliplib is inlined below by the build — in dev it is required from disk
+  if (typeof cliplib === "undefined") {
+    // fallback: load via preload-provided copy is not possible (isolation);
+    // dev mode injects it. If missing, show a hard error (never silent).
+    document.getElementById("list").innerHTML =
+      '<div class="empty"><div class="big">E</div>renderer core missing — build error</div>';
+  }
+  var data = { pinned: [], rest: [] };
+  var query = "", sel = 0;
+
+  var elList = document.getElementById("list");
+  var elQ = document.getElementById("q");
+  var elCount = document.getElementById("count");
+
+  function rows() {
+    var all = data.pinned.concat(data.rest);
+    if (!query) return all;
+    return cliplib.search(all, query);
+  }
+
+  function render() {
+    var r = rows();
+    elCount.textContent = r.length;
+    if (sel >= r.length) sel = Math.max(0, r.length - 1);
+    var html = "";
+    if (data.pinned.length && !query) {
+      html += '<div class="sect">置顶 Pinned</div>';
+      data.pinned.forEach(function (e, i) { html += rowHtml(e, i, true); });
+      if (data.rest.length) html += '<div class="sect">历史 History</div>';
+    }
+    if (query) {
+      var rp = cliplib.search(data.pinned, query), rr = cliplib.search(data.rest, query);
+      if (rp.length) { html += '<div class="sect">置顶 Pinned</div>'; rp.forEach(function (e, i) { html += rowHtml(e, i, true); }); }
+      if (rr.length) { if (rp.length) html += ""; html += rp.length && rr.length ? '<div class="sect">历史 History</div>' : ""; rr.forEach(function (e, i) { html += rowHtml(e, i, false); }); }
+    } else {
+      data.rest.forEach(function (e, i) { html += rowHtml(e, i, false); });
+    }
+    if (!r.length) html = '<div class="empty"><div class="big">cliphusk</div>复制点什么,它就在这里了。<br>Copy something — it will appear here.</div>';
+    elList.innerHTML = html;
+    // re-mark selection (index maps over the flat rows())
+    var items = elList.querySelectorAll(".item");
+    var flat = query
+      ? cliplib.search(data.pinned, query).concat(cliplib.search(data.rest, query))
+      : data.pinned.concat(data.rest);
+    for (var i = 0; i < items.length; i++) items[i].classList.remove("sel");
+    if (items[sel]) items[sel].classList.add("sel");
+  }
+
+  function rowHtml(e, i, isPinned) {
+    var prev = cliplib.previewOf(e);
+    var time = cliplib.timeAgo(e.ts);
+    var thumb = e.kind === "image"
+      ? '<img class="thumb" src="' + e.image + '" alt="">'
+      : "";
+    return '<div class="item" data-id="' + e.id + '">' + thumb +
+      '<div class="txt"><div class="t"></div><div class="meta"><span class="mark">' + (isPinned ? "◉" : "") + '</span><span>' + time + '</span><span>' + (e.kind === "image" ? "image" : "text") + '</span></div></div>' +
+      '<div class="act"><button data-act="pin">' + (isPinned ? "Unpin" : "Pin") + '</button><button data-act="del">✕</button></div></div>';
+  }
+
+  function selectPaste() {
+    var r = rows();
+    if (!r.length || !r[sel]) return;
+    window.husk.paste(r[sel].id).then(function (res) {
+      if (res.ok) window.husk.hide();
+    });
+  }
+
+  elQ.addEventListener("input", function () { query = elQ.value; sel = 0; render(); });
+  elQ.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") { window.husk.hide(); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); sel = Math.min(sel + 1, rows().length - 1); render(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); sel = Math.max(sel - 1, 0); render(); }
+    else if (e.key === "Enter") { e.preventDefault(); selectPaste(); }
+    else if (e.key === "p" || e.key === "P") {
+      var r = rows(); if (r[sel]) window.husk.togglePin(r[sel].id);
+    } else if (e.key === "Backspace" && (e.shiftKey || e.metaKey)) {
+      e.preventDefault();
+      var r2 = rows(); if (r2[sel]) window.husk.remove(r2[sel].id);
+    } else if ((e.key === "c" || e.key === "C") && e.shiftKey && (e.metaKey || e.ctrlKey)) {
+      window.husk.clearUnpinned();
+    }
+  });
+
+  elList.addEventListener("click", function (e) {
+    var act = e.target.getAttribute && e.target.getAttribute("data-act");
+    var item = e.target.closest ? e.target.closest(".item") : null;
+    if (!item) return;
+    var id = item.getAttribute("data-id");
+    if (act === "pin") window.husk.togglePin(id);
+    else if (act === "del") window.husk.remove(id);
+    else window.husk.paste(id).then(function (res) { if (res.ok) window.husk.hide(); });
+  });
+
+  window.husk.onHistory(function (d) { data = d; render(); });
+  window.husk.onSearchFocus(function () { elQ.focus(); elQ.select(); });
+  window.husk.query().then(function (d) { data = d; render(); elQ.focus(); });
+})();
+</script>
+</body>
+</html>

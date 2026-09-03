@@ -1,0 +1,44 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Pure-core tests
+        run: node --test test/cliplib.test.js
+      - name: Build renderer (inline core)
+        run: node build.js
+      - name: Install Electron (dev dependency)
+        run: npm install --no-save electron@44
+      - name: Self-test (real clipboard, system-verified)
+        run: npx electron . --selftest
+      - name: Package portable app
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            npx electron --version
+            mkdir -p out && cp -R node_modules/electron/dist/Electron.app out/cliphusk.app
+            mkdir -p out/cliphusk.app/Contents/Resources/app
+            cp -R main.js preload.js renderer.html cliplib.js package.json out/cliphusk.app/Contents/Resources/app/
+            cd out && zip -qry cliphusk-mac.zip cliphusk.app
+          else
+            mkdir -p out/app && cp -R main.js preload.js renderer.html cliplib.js package.json out/app/
+            cp -R node_modules/electron/dist/* out/
+            mv out/app out/resources 2>/dev/null || true
+            cd out && zip -qry cliphusk-win.zip . -x resources/electron.exe
+            mv resources/electron.exe cliphusk.exe 2>/dev/null || true
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cliphusk-${{ matrix.os }}
+          path: out/*.zip
