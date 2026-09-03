@@ -30,10 +30,13 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
+          # portable layout: rename the dist bundle, put app sources in Resources/app
+          cp -R node_modules/electron/dist/Electron.app out/cliphusk.app
+          rm -rf out/cliphusk.app/Contents/Resources/default_app.asar
           mkdir -p out/cliphusk.app/Contents/Resources/app
-          cp -R node_modules/electron/dist/Electron.app out/cliphusk.app 2>/dev/null || true
-          cp -R node_modules/electron/dist/* out/cliphusk.app/Contents/ 2>/dev/null || true
           cp -R main.js preload.js renderer.html cliplib.js package.json out/cliphusk.app/Contents/Resources/app/
+          # dock icon identity
+          defaults write out/cliphusk.app/Contents/Info CFBundleIdentifier org.w1977.cliphusk 2>/dev/null || true
           cd out && zip -qry cliphusk-mac.zip cliphusk.app
       - name: Package portable app (Windows)
         if: runner.os == 'Windows'
