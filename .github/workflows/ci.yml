@@ -26,22 +26,31 @@ jobs:
           npx electron . --selftest || code=$?
           cat "$HOME/Library/Application Support/cliphusk/selftest.json" 2>/dev/null || cat "$APPDATA/cliphusk/selftest.json" 2>/dev/null || true
           exit ${code:-0}
-      - name: Package portable app
+      - name: Package portable app (macOS)
+        if: runner.os == 'macOS'
         shell: bash
         run: |
-          if [ "$RUNNER_OS" = "macOS" ]; then
-            npx electron --version
-            mkdir -p out && cp -R node_modules/electron/dist/Electron.app out/cliphusk.app
-            mkdir -p out/cliphusk.app/Contents/Resources/app
-            cp -R main.js preload.js renderer.html cliplib.js package.json out/cliphusk.app/Contents/Resources/app/
-            cd out && zip -qry cliphusk-mac.zip cliphusk.app
-          else
-            mkdir -p out/app && cp -R main.js preload.js renderer.html cliplib.js package.json out/app/
-            cp -R node_modules/electron/dist/* out/
-            mv out/app out/resources 2>/dev/null || true
-            cd out && zip -qry cliphusk-win.zip . -x resources/electron.exe
-            mv resources/electron.exe cliphusk.exe 2>/dev/null || true
-          fi
+          mkdir -p out/cliphusk.app/Contents/Resources/app
+          cp -R node_modules/electron/dist/Electron.app out/cliphusk.app 2>/dev/null || true
+          cp -R node_modules/electron/dist/* out/cliphusk.app/Contents/ 2>/dev/null || true
+          cp -R main.js preload.js renderer.html cliplib.js package.json out/cliphusk.app/Contents/Resources/app/
+          cd out && zip -qry cliphusk-mac.zip cliphusk.app
+      - name: Package portable app (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out/app | Out-Null
+          Copy-Item -Recurse main.js,preload.js,renderer.html,cliplib.js,package.json out/app/
+          Copy-Item -Recurse node_modules/electron/dist/* out/
+          Rename-Item out/resources out/app2 -ErrorAction SilentlyContinue
+          if (Test-Path out/resources) { Copy-Item -Recurse out/resources out/app2 }
+          # Electron portable: resources/app + electron.exe renamed
+          if (Test-Path out/resources/default_app.asar) { Remove-Item out/resources/default_app.asar }
+          Copy-Item -Recurse out/app out/resources/cliphusk-app -ErrorAction SilentlyContinue
+          # use the electron.exe directly with our app injected
+          Rename-Item out/electron.exe cliphusk.exe -ErrorAction SilentlyContinue
+          Compress-Archive -Path out/* -DestinationPath cliphusk-win.zip -Force
+          Move-Item cliphusk-win.zip out/cliphusk-win.zip
       - uses: actions/upload-artifact@v4
         with:
           name: cliphusk-${{ matrix.os }}
