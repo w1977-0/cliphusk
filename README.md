@@ -21,7 +21,7 @@ What it deliberately does **not** have: editors, scripting, tabs, cloud sync, ac
 
 ## Design
 
-Same house language as the browser-tool series (yearpulse, idphoto-kit, signpad-free, exactkb, tax-lens, meetzones): ink-and-paper Swiss typography, hairline rules, monospaced tabular numbers, pinned section on top. Dark mode follows the system.
+Same house language as the browser-tool series — [yearpulse](https://w1977-0.github.io/yearpulse/) (年度进度), [idphoto-kit](https://w1977-0.github.io/idphoto-kit/) (证件照), [signpad-free](https://w1977-0.github.io/signpad-free/) (手写签名), [exactkb](https://w1977-0.github.io/exactkb/) (图片压缩), [tax-lens](https://w1977-0.github.io/tax-lens/) (个税五险), [meetzones](https://w1977-0.github.io/meetzones/) (会议排期): ink-and-paper Swiss typography, hairline rules, monospaced tabular numbers, pinned section on top. Dark mode follows the system; hover/focus/selection/scrollbars carry the same ink-and-paper treatment.
 
 ## Install
 
