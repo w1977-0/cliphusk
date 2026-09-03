@@ -21,7 +21,11 @@ jobs:
       - name: Install Electron (dev dependency)
         run: npm install --no-save electron@44
       - name: Self-test (real clipboard, system-verified)
-        run: npx electron . --selftest
+        shell: bash
+        run: |
+          npx electron . --selftest || code=$?
+          cat "$HOME/Library/Application Support/cliphusk/selftest.json" 2>/dev/null || cat "$APPDATA/cliphusk/selftest.json" 2>/dev/null || true
+          exit ${code:-0}
       - name: Package portable app
         shell: bash
         run: |

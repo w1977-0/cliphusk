@@ -209,16 +209,25 @@ async function runSelftest() {
     const firstText = history.find((e) => e.kind === "text");
     return hits.length === 2 && firstText && firstText.text === "__cliphusk_dedup_a__";
   });
-  check("persistence", () => { try { fs.writeFileSync(STORE, JSON.stringify(history)); return true; } catch (e) { return false; } });
-  check("hotkeys-registered", () => TOGGLE_KEYS.every((k) => globalShortcut.isRegistered(k)));
+  await check("persistence", async () => { try { fs.writeFileSync(STORE, JSON.stringify(history)); return true; } catch (e) { return false; } });
+  await check("hotkeys-registered", async () => TOGGLE_KEYS.every((k) => globalShortcut.isRegistered(k)));
 
   const pass = results.filter(([, ok]) => ok).length;
   for (const [n, ok] of results) console.log((ok ? "  ok  " : "  FAIL") + "  " + n);
   console.log(`selftest: ${pass}/${results.length}`);
+  const code = pass === results.length ? 0 : 1;
   try {
     fs.writeFileSync(path.join(app.getPath("userData"), "selftest.json"), JSON.stringify(results));
   } catch (e) {}
-  setTimeout(() => app.exit(pass === results.length ? 0 : 1), 200);
+  process.exitCode = code;
+  setTimeout(() => {
+    try { globalShortcut.unregisterAll(); } catch (e) {}
+    try { if (tray) tray.destroy(); } catch (e) {}
+    try { app.exit(code); } catch (e) {}
+    // belt and braces: app.exit has been observed not to settle the exit
+    // code in some headless environments; process.exit cannot be ignored.
+    setTimeout(() => process.exit(code), 250);
+  }, 100);
 }
 
 const TRAY_ICON = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAQklEQVR42mNkwAPGzYj4DwPi/4j4DyD+A4zYPwni/4bGPwDTPwjif0D2f4Cc/xrk//H/g9v/BzpfDBgAcRADiNIMLJwAAAAASUVORK5CYII=";
