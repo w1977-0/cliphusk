@@ -39,18 +39,14 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force out/app | Out-Null
-          Copy-Item -Recurse main.js,preload.js,renderer.html,cliplib.js,package.json out/app/
-          Copy-Item -Recurse node_modules/electron/dist/* out/
-          Rename-Item out/resources out/app2 -ErrorAction SilentlyContinue
-          if (Test-Path out/resources) { Copy-Item -Recurse out/resources out/app2 }
-          # Electron portable: resources/app + electron.exe renamed
-          if (Test-Path out/resources/default_app.asar) { Remove-Item out/resources/default_app.asar }
-          Copy-Item -Recurse out/app out/resources/cliphusk-app -ErrorAction SilentlyContinue
-          # use the electron.exe directly with our app injected
-          Rename-Item out/electron.exe cliphusk.exe -ErrorAction SilentlyContinue
-          Compress-Archive -Path out/* -DestinationPath cliphusk-win.zip -Force
-          Move-Item cliphusk-win.zip out/cliphusk-win.zip
+          $dist = "node_modules/electron/dist"
+          New-Item -ItemType Directory -Force "resources/app" | Out-Null
+          Copy-Item main.js,preload.js,renderer.html,cliplib.js,package.json resources/app/
+          Remove-Item "$dist/resources/default_app.asar" -ErrorAction SilentlyContinue
+          Copy-Item -Recurse resources $dist/resources/
+          Compress-Archive -Path "$dist/*" -DestinationPath cliphusk-win.zip -Force
+          New-Item -ItemType Directory -Force out | Out-Null
+          Move-Item cliphusk-win.zip out/
       - uses: actions/upload-artifact@v4
         with:
           name: cliphusk-${{ matrix.os }}
